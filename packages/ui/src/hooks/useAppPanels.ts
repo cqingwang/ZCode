@@ -14,6 +14,14 @@ import {
   saveTaskSidePaneMemoryState,
 } from "@/lib/taskSidePaneMemory.js";
 import {
+  persistWorkspaceSidebarCollapsedPreference,
+  readWorkspaceSidebarCollapsedPreference,
+  readWorkspaceSidebarMobileViewportMatch,
+  resolveWorkspaceSidebarCollapsedAfterToggle,
+  resolveWorkspaceSidebarInitialCollapsed,
+  subscribeWorkspaceSidebarMobileViewportMatch,
+} from "@/lib/workspaceSidebarCollapse.js";
+import {
   closeSidePaneTab,
   closeSidePaneTabForParent,
   closeVisibleOtherSidePaneTabs,
@@ -202,7 +210,40 @@ export function useAppPanels(options: {
   // 交互说明：侧栏显隐按钮放在 App 外层，而不是 Sidebar 内部。
   // 这样即使侧栏被隐藏，入口也仍然留在左上角，不会出现"收起后没有地方再展开"的问题；
   // 同时这里统一处理 macOS 红绿灯安全区，避免按钮和系统窗口控件重叠。
-  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  // 抽拉面板首帧：移动端屏幕默认收起（否则会话区被挤到不可读），用户显式选择过则优先沿用，
+  // 其余场景保持展开。规则集中在 workspaceSidebarCollapse，避免这里再长出一套判断分支。
+  const [isSidebarMobileViewport, setIsSidebarMobileViewport] = useState(
+    readWorkspaceSidebarMobileViewportMatch,
+  );
+  const [isSidebarVisible, setIsSidebarVisible] = useState(() => {
+    // 两个首帧读取都放进 lazy initializer，避免每次 render 都查 matchMedia。
+    const [mobileViewportMatch, storedPreference] = [
+      readWorkspaceSidebarMobileViewportMatch(),
+      readWorkspaceSidebarCollapsedPreference(),
+    ];
+    return !resolveWorkspaceSidebarInitialCollapsed({ mobileViewportMatch, storedPreference });
+  });
+  useEffect(() => {
+    // 视口跨过移动端断点时要更新匹配态：banner 与角标的可见性都依赖它，
+    // 只读首帧会让旋转屏幕或resize到手机宽度后入口消失。
+    return subscribeWorkspaceSidebarMobileViewportMatch((matches) => {
+      setIsSidebarMobileViewport(matches);
+    });
+  }, []);
+  // 收起态是唯一需要长期记住的交互偏好。集中在这里按状态变更落盘：
+  // 角标、悬浮 banner、快捷键与 conversation 过窄自动收起都走同一个 setIsSidebarVisible，
+  // 因此只有一条写入路径；跳过首次提交，保留「用户从未选择过」的空偏好，
+  // 让移动端默认收起规则在下次访问继续生效。
+  const sidebarCollapsedPersistencePrimedRef = useRef(false);
+  useEffect(() => {
+    if (!sidebarCollapsedPersistencePrimedRef.current) {
+      sidebarCollapsedPersistencePrimedRef.current = true;
+      return;
+    }
+    persistWorkspaceSidebarCollapsedPreference(
+      resolveWorkspaceSidebarCollapsedAfterToggle(isSidebarVisible),
+    );
+  }, [isSidebarVisible]);
   const [browserNavigationRequest, setBrowserNavigationRequest] =
     useState<BrowserNavigationRequest | null>(null);
   const [allRecentClosedSidePaneTabs, setAllRecentClosedSidePaneTabs] = useState<
@@ -1574,6 +1615,7 @@ export function useAppPanels(options: {
     isSidePaneCollapsed,
     setIsSidePaneCollapsed,
     isSidebarVisible,
+    isSidebarMobileViewport,
     browserNavigationRequest,
     setBrowserNavigationRequest,
     // 回调

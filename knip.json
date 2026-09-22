@@ -25,6 +25,9 @@
     "packages/services": {
       "entry": ["src/index.ts", "src/storage/module.ts"]
     },
+    "packages/ui": {
+      "entry": ["test/*.test.ts", "test/*.e2e.mjs"]
+    },
     "apps/zcode-cli/packages/browser-use-plugin": {
       "entry": ["src/browser-client.ts"]
     }

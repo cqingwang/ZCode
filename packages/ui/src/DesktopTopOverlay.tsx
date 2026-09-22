@@ -43,6 +43,8 @@ interface DesktopTopOverlayProps {
   onGoForward: () => void;
   hideTaskNavigationButtons?: boolean;
   newTaskDisabledReason?: string;
+  /** 抽屉等更高层级的覆盖层出现时抬升浮层，保持左上角浮层入口可见。 */
+  className?: string;
 }
 
 export function DesktopTopOverlay({
@@ -73,6 +75,7 @@ export function DesktopTopOverlay({
   onGoForward,
   hideTaskNavigationButtons = false,
   newTaskDisabledReason,
+  className,
 }: DesktopTopOverlayProps) {
   const { intl } = useZCodeIntl();
   const SidebarToggleIcon = isSidebarVisible ? PanelLeftClose : PanelLeftOpen;
@@ -104,6 +107,7 @@ export function DesktopTopOverlay({
       style={topOverlayWidthStyle}
       className={cn(
         "@container/topoverlayer pointer-events-none absolute h-14 flex left-0 top-0 z-20 w-fit",
+        className,
         // Windows/Linux 主面板新增 4px 留白及 1px 边框，左侧工具组需同步偏移才能对齐 Header 中心线。
         usesCustomCaptionArea && "top-1 mt-px",
       )}

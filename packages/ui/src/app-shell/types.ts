@@ -150,6 +150,8 @@ export interface WorkspaceShellLayoutProps extends Omit<AppProps, "baseFeedbackS
   canTaskNavForward: boolean;
   isTerminalOpen: boolean;
   isSidebarVisible: boolean;
+  /** 当前视口是否处于移动端屏幕断点（<768px）：决定侧栏覆盖层、角标与悬浮 banner 的呈现。 */
+  isSidebarMobileViewport: boolean;
   isBrowserOpen: boolean;
   supportsEmbeddedBrowser: boolean;
   isGitOpen: boolean;

@@ -219,6 +219,7 @@ export function App({
     isSidePaneCollapsed,
     setIsSidePaneCollapsed,
     isSidebarVisible,
+    isSidebarMobileViewport,
     browserNavigationRequest,
     setBrowserNavigationRequest,
     handleOpenCodeViewer,
@@ -1185,6 +1186,7 @@ export function App({
         canTaskNavForward={canTaskNavForward}
         isTerminalOpen={isTerminalOpen}
         isSidebarVisible={isSidebarVisible}
+        isSidebarMobileViewport={isSidebarMobileViewport}
         isBrowserOpen={isBrowserOpen}
         supportsEmbeddedBrowser={supportsEmbeddedBrowser}
         isGitOpen={isGitOpen}

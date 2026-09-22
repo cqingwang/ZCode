@@ -32,6 +32,14 @@ import { usePaneSessionPersistence } from "@/v4/usePaneSessionPersistence.js";
 import { requestV4ComposerDraftWorkspaceTransfer } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { ChatEmptyWorkspacePreviewMenu } from "@/ChatEmptyState.js";
 import { DesktopTopOverlay } from "@/DesktopTopOverlay.js";
+import { WorkspaceSidebarCollapseTab } from "@/app-shell/WorkspaceSidebarCollapseTab.js";
+import { WorkspaceSidebarFloatingBanner } from "@/app-shell/WorkspaceSidebarFloatingBanner.js";
+import {
+  shouldRenderWorkspaceSidebarAsOverlay,
+  shouldShowWorkspaceSidebarCollapseTab,
+  shouldShowWorkspaceSidebarFloatingBanner,
+  WORKSPACE_SIDEBAR_OVERLAY_COLLAPSED_WIDTH_PX,
+} from "@/lib/workspaceSidebarCollapse.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { WorkspacePluginPreview } from "@/WorkspacePluginPreview.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -246,6 +254,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   canTaskNavForward,
   isTerminalOpen,
   isSidebarVisible,
+  isSidebarMobileViewport,
   isSidePaneOpen,
   isBrowserOpen,
   supportsEmbeddedBrowser,
@@ -351,7 +360,15 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   const workspaceResizeHandleInsetPx = resolveWorkspaceShellResizeHandleInsetPx(
     workspaceShellRadiusOptions,
   );
-  const collapsedSidebarWidthPx = hasDesktopPanelInset ? 4 : 0;
+  // 抽拉侧栏：移动端屏幕下侧栏走覆盖层，收起时完全不占布局，展开时也不挤压会话区。
+  const isSidebarOverlayMode = shouldRenderWorkspaceSidebarAsOverlay({
+    mobileViewportMatch: isSidebarMobileViewport,
+  });
+  const collapsedSidebarWidthPx = isSidebarOverlayMode
+    ? WORKSPACE_SIDEBAR_OVERLAY_COLLAPSED_WIDTH_PX
+    : hasDesktopPanelInset
+      ? 4
+      : 0;
   const [draftHeaderDropTargetController, setDraftHeaderDropTargetController] =
     useState<ConversationDropTargetController | null>(null);
   const fileTreeOpenRequestIdRef = useRef(0);
@@ -1533,7 +1550,18 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           data-workspace-sidebar-panel="true"
           id="sidebar"
           className={cn(
-            "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
+            "w-[var(--workspace-sidebar-panel-width)] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
+            // 移动端覆盖层：脱离流式布局盖在会话区上，展开不挤压内容；
+            // 收起宽度恒为 0，同一个 width 过渡即得到抽拉动画。
+            // 分隔线只在展开态加：box-sizing 下 border 会让收起宽度多出 1px，抽屉会露边。
+            // 层级必须高于会话输入框（composer 作为 flex item 自带 z-20 stacking context，
+            // 且 #content 在 DOM 里位于侧栏之后），否则输入框会绘制在抽屉之上。
+            isSidebarOverlayMode
+              ? cn(
+                  "absolute inset-y-0 left-0 z-40 max-w-[min(20rem,86%)] bg-background shadow-xl",
+                  isSidebarPanelVisible && "border-r border-border",
+                )
+              : "relative max-w-[50%]",
             // 拖动侧栏宽度时如果继续过渡 width，会让指针移动和实际宽度之间产生滞后。
             // 拖拽 active 通过 DOM 标记切 transition，避免 pointerdown/up 为了切 class 重渲染整棵 workspace。
             isSidebarPanelVisible ? "opacity-100" : "pointer-events-none opacity-0",
@@ -1608,7 +1636,35 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           </aside>
         </div>
 
-        {isSidebarVisible ? (
+        {isSidebarOverlayMode && isSidebarVisible ? (
+          // 覆盖层模式下补一层遮罩：点空白处即收起，与抽屉的通用交互一致。
+          // 复用同一个 toggle 入口，不引入第二份收起状态。
+          <div
+            data-testid="workspace-sidebar-overlay-scrim"
+            aria-hidden="true"
+            className="absolute inset-0 z-30 bg-black/40 supports-backdrop-filter:backdrop-blur-xs"
+            onClick={handleToggleSidebar}
+          />
+        ) : null}
+        <WorkspaceSidebarCollapseTab
+          isSidebarCollapsed={!isSidebarVisible}
+          hidden={
+            !shouldShowWorkspaceSidebarCollapseTab({
+              mobileViewportMatch: isSidebarMobileViewport,
+              isSidebarCollapsed: !isSidebarVisible,
+            })
+          }
+          onToggleSidebar={handleToggleSidebar}
+          toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
+        />
+        {shouldShowWorkspaceSidebarFloatingBanner({
+          mobileViewportMatch: isSidebarMobileViewport,
+          isSidebarCollapsed: !isSidebarVisible,
+        }) ? (
+          <WorkspaceSidebarFloatingBanner onExpandSidebar={handleToggleSidebar} />
+        ) : null}
+
+        {isSidebarVisible && !isSidebarOverlayMode ? (
           <div
             role="separator"
             tabIndex={0}
@@ -1961,6 +2017,9 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
             canGoForward={canGoForward}
             showNewTaskButton={showTopOverlayNewTaskButton}
             appLogoUrl={appLogoUrl}
+            // 抽屉展开时抬到抽屉之上：左上角浮层按钮（后退/前进）此前就绘制在侧栏顶部拖拽区之上，
+            // 抽屉抬到 z-40 后若不联动，移动端展开态会突然丢掉这两个入口。
+            className={isSidebarOverlayMode && isSidebarVisible ? "z-50" : undefined}
             platform={platform}
             onToggleSidebar={handleToggleSidebar}
             onCreateTask={handleCreateTaskInChat}

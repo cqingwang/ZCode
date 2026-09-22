@@ -15,7 +15,9 @@
   },
   "scripts": {
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:sidebar-collapse:e2e": "node test/workspaceSidebarCollapse.e2e.mjs"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "1.2.4",
@@ -87,7 +89,9 @@
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "playwright-core": "1.59.1",
     "tailwindcss": "^4.2.2",
+    "tsx": "^4.19.4",
     "typescript": "^6.0.2",
     "unified": "^11.0.5"
   },

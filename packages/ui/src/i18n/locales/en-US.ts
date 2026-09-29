@@ -3421,6 +3421,7 @@ const enUS: Record<string, string> = {
   "settings.usage.sectionDescription": "Built from local app session history.",
   "settings.usage.tab.appUsage": "App usage",
   "settings.usage.tab.codingPlan": "Individual Plan",
+  "settings.usage.appVersion": "Version {version}",
   "settings.usage.sectionDescriptionRemote":
     "Synced from the selected provider monitor API for real token and tool usage.",
   "settings.usage.remoteTokenHint": "From the selected provider model-usage API",

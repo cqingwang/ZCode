@@ -3220,6 +3220,7 @@ const zhCN: Record<string, string> = {
   "settings.usage.sectionDescription": "来自本地应用会话历史。",
   "settings.usage.tab.appUsage": "应用用量",
   "settings.usage.tab.codingPlan": "个人套餐",
+  "settings.usage.appVersion": "版本 {version}",
   "settings.usage.sectionDescriptionRemote": "来自当前供应商统计接口，统计真实 Token 与工具调用。",
   "settings.usage.remoteTokenHint": "来自当前供应商模型用量接口",
   "settings.usage.calls": "调用次数",

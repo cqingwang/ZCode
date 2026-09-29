@@ -22,7 +22,9 @@ import {
   TID_SETTINGS_BACK_BUTTON,
   TID_SETTINGS_PAGE,
   TID_SETTINGS_SECTION_NAV,
+  TID_SETTINGS_USAGE_APP_VERSION,
   TID_SETTINGS_USAGE_TAB,
+  ZCODE_VERSION,
   testId,
 } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
@@ -30,6 +32,7 @@ import { toast } from "@/components/ui/toast.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
+import { resolveAppVersionLabel } from "@/lib/appVersionLabel.js";
 import { getPathLeaf } from "@/lib/path.js";
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
 import { useUsageEntitlement } from "@/hooks/useUsageEntitlement.js";
@@ -1645,6 +1648,17 @@ export function SettingsPage({
                               />
                             ) : null}
                           </div>
+                          {activeSection === "usage" ? (
+                            <div
+                              data-testid={TID_SETTINGS_USAGE_APP_VERSION}
+                              className="shrink-0 text-ui-sm text-foreground-subtle"
+                            >
+                              {intl.formatMessage(
+                                { id: "settings.usage.appVersion" },
+                                { version: resolveAppVersionLabel(ZCODE_VERSION) },
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                         {activeSection === "general" ? (
                           <GeneralSectionHeader localePreference={localePreference} />

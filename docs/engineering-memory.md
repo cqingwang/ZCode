@@ -457,3 +457,60 @@ curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:3030/api/server-info?
 - 直接 `rm -rf apps/zcode-cli/packages/*/dist`：会删掉不在构建闭包内的 `node-repl-host` 等产物且无法重建。
 - 重启后单次 `curl` 判定部署成败：`Type=simple` 存在约 1 秒的监听就绪窗口，必须轮询。
 - 跳过 `pnpm install` 直接构建：新 main 引入的依赖（如 `@larksuiteoapi/node-sdk`）会稳定导致后端打包失败。
+
+---
+
+## EM-2026-09-29-02：`pnpm dev:web` 后端端口与生产 `zcode.service` 冲突
+
+- **日期**：2026-09-29
+- **作用域**：`package.json`、`scripts/dev-web.mjs`、`packages/web/vite.config.ts`、`packages/server/src/entry-http.ts`
+- **适用版本**：仓库根 `package.json` version 3.14.3；`packages/server` 默认端口 3030
+
+### 症状 / 原始错误
+
+本机已运行 systemd `zcode.service`（监听 `3030`）时执行 `pnpm dev:web`，后端启动即崩溃：
+
+```
+Error: listen EADDRINUSE: address already in use :::3030
+    at Server.setupListenHandle [as _listen2] (node:net:1948:16)
+    code: 'EADDRINUSE', errno: -98, syscall: 'listen', address: '::', port: 3030
+```
+
+`concurrently -k` 随后连带杀掉 web dev server，浏览器访问 `5173` 得到 `ERR_CONNECTION_REFUSED`。
+
+### 触发条件
+
+- 生产 `zcode.service` 正在监听 `3030`（`deploy.sh` 部署的发行形态）。
+- 在同一台机器上执行 `pnpm dev:web` 或 `pnpm dev:server`。
+
+### 根因
+
+- `packages/server/src/entry-http.ts` 的默认端口是 `3030`，与生产 `zcode.service` 端口相同；`pnpm dev:web` 未注入 `PORT`。
+- `packages/web/vite.config.ts` 的 `/ws`、`/api` 代理目标硬编码为 `localhost:3030`，即使后端换端口也会代理到错误目标。
+
+### 最终修复
+
+- 新增 `scripts/dev-web.mjs`：统一注入 `PORT`（server 监听）与 `ZCODE_DEV_SERVER_PORT`（vite 代理目标），默认 `3031`，可用 `ZCODE_DEV_SERVER_PORT` 覆盖；`dev:web` / `dev:server` 均经此包装器，内层并发命令保留为 `dev:web:inner` / `dev:server:inner`。
+- `packages/web/vite.config.ts` 的 `/ws`、`/api` 代理目标改为读取 `ZCODE_DEV_SERVER_PORT`（默认 `3031`）。
+- **生产默认端口 `3030` 保持不变**，仅开发链路退到 `3031`。
+
+### 回归测试路径与执行命令
+
+端口冲突属于环境/进程级问题，无法在单元层表达，以可重复的进程探测替代：
+
+```bash
+cd /mnt/fs/ZCode
+pnpm dev:web &                 # 期望 server 日志出现 http://localhost:3031
+sleep 8
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5173/          # 期望 200
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5173/api/server-info  # 期望 200（代理到 3031）
+ss -ltnp | grep -E ':3031|:5173'   # 期望两个端口都在监听
+```
+
+**红绿证据**：修复前 `pnpm dev:web` 报 `EADDRINUSE :::3030` 并连带杀掉 vite；修复后 server 日志 `http://localhost:3031`，`5173/` 与 `5173/api/server-info` 均返回 200。
+
+### 已排除的无效方案
+
+- 直接改 `entry-http.ts` 默认端口：会改变生产 `zcode.service` 与 `deploy.sh` 的健康检查端口，越界。
+- 只改 vite 代理、不改 server 监听端口：后端仍撞 `3030`，代理指向空端口。
+- 只设 `PORT=3031` 环境变量：vite 代理仍硬编码 `3030`，`/ws`、`/api` 全部失败。

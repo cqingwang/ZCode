@@ -419,6 +419,8 @@ export const TID_SUBAGENT_ROW = "subagent-row";
 export const TID_SUBAGENT_BUILT_IN_MODEL_TRIGGER = "subagent-built-in-model-trigger";
 /** 设置页使用统计顶层 tab（动态后缀为 usage tab id） */
 export const TID_SETTINGS_USAGE_TAB = "settings-usage-tab";
+/** 设置页使用统计标题行右侧的当前应用版本号 */
+export const TID_SETTINGS_USAGE_APP_VERSION = "settings-usage-app-version";
 /** 侧边栏头像菜单剩余额度子菜单入口 */
 export const TID_SIDEBAR_USAGE_REMAINING_TRIGGER = "sidebar-usage-remaining-trigger";
 /** 侧边栏头像菜单使用统计入口 */

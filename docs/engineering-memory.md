@@ -111,11 +111,12 @@ KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=zcode
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=/home/chan/.zcode /mnt/fs/ZCode
+# 沙箱/加固项已关闭（见 EM-2026-09-23-01）；如需恢复加固，取消注释并保留 ReadWritePaths
+# NoNewPrivileges=true
+# PrivateTmp=true
+# ProtectSystem=full
+# ProtectHome=read-only
+# ReadWritePaths=/home/chan/.zcode /mnt/fs/ZCode
 
 [Install]
 WantedBy=multi-user.target
@@ -127,7 +128,7 @@ WantedBy=multi-user.target
 
 1. `ExecStart` 必须写 **node 绝对路径**。本机无 `/usr/bin/node`，Node 由 nvm 提供（`/home/chan/.nvm/versions/node/v24.14.0/bin/node`），systemd 不加载 shell profile，用 `node` 会直接失败。
 2. 用**系统级**单元而非 `--user` 单元：`--user` 需要 `loginctl enable-linger chan` 才能在无登录会话时开机启动。
-3. `ProtectHome=read-only` 与 `ProtectSystem=full` 下必须显式 `ReadWritePaths` 放开 `/home/chan/.zcode`（settings/session 写入）与 `/mnt/fs/ZCode`，否则服务启动即因写权限失败。
+3. `ProtectHome=read-only` 与 `ProtectSystem=full` 下必须显式 `ReadWritePaths` 放开 `/home/chan/.zcode`（settings/session 写入）与 `/mnt/fs/ZCode`，否则服务启动即因写权限失败。当前单元已注释掉这些加固项（沙箱关闭，见 EM-2026-09-23-01），恢复加固时必须同时恢复 `ReadWritePaths`。
 4. 重新构建产物后需 `sudo systemctl restart zcode.service` 才生效。
 
 **运维命令**：
@@ -306,3 +307,72 @@ systemctl is-active zcode.service && curl -sso /dev/null -w '%{http_code}\n' htt
 恢复 `z-40` 后 `occluded: 0`，30/30 通过。
 
 **已排除的无效方案**：给侧栏加 `z-50` 却不同步遮罩与浮层（浮层入口被抽屉吃掉）；用 `position: fixed` 或提层到 `#root`（跨 stacking context 迁移，波及 react-resizable-panels 布局）；靠调整 DOM 顺序让侧栏排最后（外层是 CSS 变量驱动的自定义 split，顺序变更影响流式布局与分隔线）。
+
+---
+
+## EM-2026-09-23-01：zcode web 服务“沙箱模式”来自 systemd 加固项，而非 `~/.zcode` 下的 flag
+
+- **日期**：2026-09-23
+- **作用域**：`/etc/systemd/system/zcode.service`、`~/.zcode`、`apps/zcode-cli`（Bash 工具与执行适配器）
+- **适用版本**：仓库 version 3.14.0；CLI `@zcode/cli` 0.16.9；Ubuntu + systemd
+
+### 症状 / 原始观察
+
+服务及其派生的 `zcode-cli` / 子进程运行在“沙箱”里：`/home`、`/usr`、`/etc` 只读，`/tmp` 私有，`NoNewPrivs: 1`、`CapEff: 0000000000000000`；工作区之外写入与 `setuid`/`sudo` 类操作失效。
+
+```bash
+p=$(systemctl show -p MainPID --value zcode.service)
+grep -E 'NoNewPrivs|Seccomp|CapEff' /proc/$p/status   # NoNewPrivs:1 / Seccomp:0 / CapEff:0000000000000000
+grep -E ' /home | /usr | /etc | /tmp ' /proc/$p/mountinfo
+# 8:2 /home /home ro                                  -> ProtectHome=read-only
+# 8:2 /etc /etc ro 、 8:2 /usr /usr ro                 -> ProtectSystem=full
+# 0:35 /systemd-private-<id>-zcode.service-*/tmp /tmp  -> PrivateTmp=true
+```
+
+### 触发条件
+
+- 排查“zcode 是否开了沙箱、如何关闭”；或服务子进程报 `EROFS` / `read-only file system` / `Operation not permitted`。
+
+### 根因
+
+1. **`~/.zcode` 下不存在任何控制沙箱的 flag**。逐项核验：`v2/setting.json`、`v2/config.json`、`v2/bot-config.json`、`v2/provider_config.json` 无 `sandbox` 键；`cli/log/*.jsonl` 无 `sandbox` 字段；`~/.zcode/server/agents/glm/zcode.cjs`（内置 agent 包）中 `sandbox` 只出现在三类无关代码：`pac-resolver` 的 vm `sandbox`、微信 bot 命令白名单的 `sandboxMode`（未启用）、Bash 工具的透传字段。
+2. CLI 侧唯一相关开关是 Bash 工具入参 `dangerouslyDisableSandbox`（`apps/zcode-cli/packages/contracts/src/tools/bash.ts`），它只把 `{enabled}` 填进 `ExecutionRequest.sandbox`；**执行适配器 `node-execution-adapter-run.ts` 并不消费该字段**（源码注释：“sandbox 撤除后……”），因此不产生任何真实 OS 隔离，只影响遥测字段 `zcode.command_execution.sandboxed`。
+3. 真实隔离来自 `zcode.service` 的 systemd 加固项 `ProtectHome=read-only` + `ProtectSystem=full` + `PrivateTmp=true` + `NoNewPrivileges=true`（配 `ReadWritePaths` 白名单）。子进程继承该挂载命名空间与能力集；`Seccomp: 0` 说明不是 seccomp，而是 mount/privileges 命名空间。
+
+### 最终修复
+
+注释掉单元中四项加固（`ReadWritePaths` 随之失去意义，一并注释；恢复加固时需一起恢复），再 `daemon-reload` + `restart`：
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl restart zcode.service
+systemctl show zcode.service -p ProtectSystem -p ProtectHome -p PrivateTmp -p NoNewPrivileges
+# 期望：ProtectSystem=no / ProtectHome=no / PrivateTmp=no / NoNewPrivileges=no
+```
+
+### 回归测试路径与执行命令
+
+部署类问题无法在单元层表达，用可重复验证脚本（与 EM-2026-09-21-01 的服务契约验证配套）：
+
+```bash
+p=$(systemctl show -p MainPID --value zcode.service)
+# 1) 沙箱位应全为 no
+systemctl show zcode.service -p ProtectSystem -p ProtectHome -p PrivateTmp -p NoNewPrivileges
+# 2) 不再存在只读重映射挂载
+grep -cE ' /home | /usr | /etc ' /proc/$p/mountinfo   # 期望 0
+# 3) 服务命名空间内 HOME 可写
+sudo nsenter -t $p -m -- runuser -u chan -- sh -c 'echo probe > ~/.zcode/tmp/_probe && echo HOME_WRITE_AS_CHAN_OK'
+# 4) 重启后鉴权与链路未退化
+curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:3030/api/server-info?token=$TOKEN"   # 期望 200
+```
+
+**红绿证据**：修复前 `ProtectSystem=full / ProtectHome=read-only / PrivateTmp=yes / NoNewPrivileges=yes`，`mountinfo` 中 `/home`、`/etc`、`/usr` 均为 `ro` 独立挂载；修复后同一组命令输出全为 `no`、只读挂载计数 0，服务 `active`、带 token 探测 200。
+
+### 已排除的无效方案
+
+- 到 `~/.zcode/v2/setting.json`、`config.json` 里找“沙箱开关”：这些文件没有该字段，改了也没有消费者。
+- 用 Bash 工具的 `dangerouslyDisableSandbox=true` 关沙箱：执行适配器已不消费该字段，只改变遥测标签，对 OS 权限无影响。
+- 只 `ProtectHome=no` 而保留 `ProtectSystem=full`：`/usr`、`/etc` 仍只读，现象只消除一半。
+
+### 注意事项
+
+关闭加固后服务拥有完整用户权限（`/tmp` 共享、`/home`、`/usr` 可写、允许 setuid），3030 对外暴露时权限面变大；如需重新加固，按被注释的四行连同 `ReadWritePaths=/home/chan/.zcode /mnt/fs/ZCode` 一起恢复。

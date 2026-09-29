@@ -376,3 +376,84 @@ curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:3030/api/server-info?
 ### 注意事项
 
 关闭加固后服务拥有完整用户权限（`/tmp` 共享、`/home`、`/usr` 可写、允许 setuid），3030 对外暴露时权限面变大；如需重新加固，按被注释的四行连同 `ReadWritePaths=/home/chan/.zcode /mnt/fs/ZCode` 一起恢复。
+
+---
+
+## EM-2026-09-29-01：`deploy.sh` 去缓存全量编译并重启 `zcode.service`
+
+- **日期**：2026-09-29
+- **作用域**：仓库根 `deploy.sh`、`apps/zcode-cli`、`packages/server`、`packages/web`、`/etc/systemd/system/zcode.service`
+- **适用版本**：仓库 version 3.14.3；CLI `@zcode/cli`；Node 24.14.0；pnpm 10.33.2；turbo 2.9.14
+
+### 症状 / 原始错误
+
+`git pull` 到官方 main 后直接部署，出现两类失败：
+
+1. 后端 `tsup` 打包失败（依赖未同步）：
+
+   ```
+   ✘ [ERROR] Could not resolve "@larksuiteoapi/node-sdk"
+       ../services/src/bots/providers/feishuProvider.ts:1514:28
+   Error: Build failed with 1 error
+   ```
+
+2. 构建成功后脚本报健康检查失败，但服务其实已正常：
+
+   ```
+   [deploy] ERROR: 健康检查失败：http://127.0.0.1:3030/ 返回 000
+   ```
+
+### 触发条件
+
+- 在官方 main 上 `git pull` 后立即重新部署，而 `node_modules` 仍是 pull 之前的依赖树。
+- 重启 `Type=simple` 的 `zcode.service` 后立刻做一次 HTTP 探测。
+
+### 根因
+
+1. **依赖漂移**：`packages/services/package.json` 与 `packages/desktop/package.json` 声明了 `@larksuiteoapi/node-sdk`（1.64.0 / 1.61.1），`pnpm-lock.yaml` 也已更新，但 `git pull` 只更新源码与 lockfile，不会安装依赖。`packages/services` 被 `tsup` 以 `noExternal` 内联进 server bundle，esbuild 解析不到该包即失败。
+2. **就绪竞态**：systemd `Type=simple` 在进程 fork 后立即把单元置为 `active`，而 Node 要再过约 1 秒才 `listen` 3030。只探测一次会把「尚未就绪」误判为「启动失败」（`curl` 退出码 7 → `000`）。
+
+### 最终修复
+
+仓库根新增 `deploy.sh`，按「同步依赖 → 清理缓存与产物 → 全量构建 → 产物校验 → 重启并轮询健康检查」执行：
+
+```bash
+bash deploy.sh              # 去缓存全量编译并重启 zcode.service
+bash deploy.sh --no-restart # 只编译与校验，不重启
+bash deploy.sh --skip-install
+```
+
+关键设计：
+
+1. **依赖同步**：默认执行 `pnpm install --frozen-lockfile`，lockfile 与 package.json 不一致时立即失败，避免把依赖漂移带进构建。
+2. **去缓存**：删除 `.turbo` / `node_modules/.cache/turbo`，导出 `TURBO_FORCE=1`（等价 `--force`），并删除 `dist` 与 `*.tsbuildinfo`。**只删 `dist` 不够**——composite 项目仅凭 `tsbuildinfo` 就会跳过 emit。
+3. **闭包精确清理**：用 `pnpm --filter "@zcode/cli..." list --depth -1 --json` 动态解析依赖闭包再删 `dist`；**不能**直接删 `apps/zcode-cli/packages/*/dist`，`node-repl-host`、`browser-use-plugin` 等不在闭包内，删了不会被重建，会导致 Agent 的 MCP 宿主缺失。
+4. **产物形态断言**：后端 `entry-http.js` 必须 ≥ 512 KB 且 `dist` 内 `.d.ts` 计数为 0（防 `pnpm typecheck` 污染，见 EM-2026-09-22 附带坑）；Agent `zcode.cjs` 必须 ≥ 1 MB。
+5. **就绪轮询**：`active` 与 HTTP 200 都要在 30 秒窗口内轮询确认，不能只探测一次。
+6. **Node 版本锚定**：从 `mise.toml` 解析锁定版本，必要时把 `~/.nvm/versions/node/v<ver>/bin` 置入 `PATH`，与 systemd 单元的 Node 绝对路径保持一致。
+
+### 回归测试路径与执行命令
+
+部署类问题无法在单元层表达，以可重复脚本 + 契约探测替代：
+
+```bash
+cd /mnt/fs/ZCode
+bash -n deploy.sh && bash deploy.sh          # 期望末行：部署完成：zcode.service 已加载最新产物
+
+systemctl is-active zcode.service && systemctl is-enabled zcode.service
+find packages/server/dist -name '*.d.ts' | wc -l   # 期望 0
+
+TOKEN=$(sudo sed -n 's/^ZCODE_SERVER_AUTH_TOKEN=//p' /etc/zcode/zcode.env)
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3030/api/server-info                  # 401
+curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:3030/api/server-info?token=$TOKEN"  # 200
+curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:3030/api/server-info?token=wrong"  # 401
+```
+
+**红绿证据**：修复前 `deploy.sh` 在后端构建阶段以 `Could not resolve "@larksuiteoapi/node-sdk"` 退出；补依赖同步后构建通过，但健康检查因单次探测报 `000` 假失败。两处修复后完整执行，输出「健康检查 -> 200 / 状态 active / 部署完成」，`.d.ts` 计数 0，鉴权契约 401/200/401 全部符合预期。
+
+### 已排除的无效方案
+
+- 只执行 `pnpm build:zcode` 或 `pnpm -r build` 后重启：不清理 turbo 缓存与 `tsbuildinfo`，命中缓存时不会真正重编译。
+- 直接 `rm -rf apps/zcode-cli/packages/*/dist`：会删掉不在构建闭包内的 `node-repl-host` 等产物且无法重建。
+- 重启后单次 `curl` 判定部署成败：`Type=simple` 存在约 1 秒的监听就绪窗口，必须轮询。
+- 跳过 `pnpm install` 直接构建：新 main 引入的依赖（如 `@larksuiteoapi/node-sdk`）会稳定导致后端打包失败。

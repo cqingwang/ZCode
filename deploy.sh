@@ -116,6 +116,13 @@ if [[ "$DO_RESTART" -eq 1 ]]; then
   service_working_directory="$(systemctl show -p WorkingDirectory --value "$SERVICE_NAME" 2>/dev/null || true)"
   [[ "$service_working_directory" == "$REPO_ROOT/packages/server" ]] ||
     die "zcode.service 的 WorkingDirectory 为 ${service_working_directory:-未知}，与当前仓库 $REPO_ROOT/packages/server 不一致；请先把单元切到本地仓库，避免部署到旧副本"
+
+  # Web 首屏从 /api/server-info 读取初始 workspace；未显式配置时会退回 process.cwd()，
+  # 也就是 packages/server，导致“不在项目中工作”的发送落到代码目录并被远端约束拒绝。
+  expected_server_workspace="$HOME/.zcode/workspace/default"
+  service_environment="$(systemctl show -p Environment --value "$SERVICE_NAME" 2>/dev/null || true)"
+  [[ "$service_environment" == *"ZCODE_SERVER_WORKSPACE=$expected_server_workspace"* ]] ||
+    die "zcode.service 缺少 ZCODE_SERVER_WORKSPACE=$expected_server_workspace；请先修正单元，避免 Web 首屏落到 packages/server"
 fi
 
 # ---------- 2. 同步依赖 ----------

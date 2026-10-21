@@ -29,12 +29,20 @@ Error: project.remote-project-required
 
 远端 Host 的单 root 约束要求每个会话必须归属项目，但“不在项目中工作”只把 cwd 指向 `~/.zcode/workspace/default`，没有写入项目归属；因此 `prepareSessionCreation` 仍以 `projectId=null` 落库，被 `assertRemoteTaskDirectories` 拒绝。
 
+另一个入口是 Web 首屏：`/api/server-info` 在未设置 `ZCODE_SERVER_WORKSPACE` 时把
+`process.cwd()` 当作初始 workspace。systemd 的 `WorkingDirectory` 是
+`packages/server`，因此首屏直接发送会落到代码目录而不是默认工作区，同样触发
+`project.remote-project-required`。
+
 ### 最终修复
 
 1. `prepareSession()` 在远端无项目时幂等创建/复用 root 固定为 `~/.zcode/workspace/default` 的普通默认项目，但仍返回 `projectId=null`，保持 UI 的“不在项目中工作”语义。
 2. `prepareSessionCreation` 仅在 cwd 等于默认工作区时把 `projectId` 解析为默认项目，再走原有 `reserveCreatedTask`；其他无项目路径继续拒绝。
 3. 历史无归属的默认工作区任务复用既有 `moveTask()` 补归属，不改 CLI 事实、cwd、执行目录、归档/置顶/未读。
 4. 不放宽远端单 root、cwd 归属和附加目录约束。
+5. `zcode.service` 保持 `WorkingDirectory=/mnt/fs/ZCode/packages/server`，并显式设置
+   `ZCODE_SERVER_WORKSPACE=/home/chan/.zcode/workspace/default`，让 Web 首屏和
+   “不在项目中工作”共用同一个默认工作区。
 
 ### 回归测试路径与命令
 

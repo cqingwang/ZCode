@@ -320,6 +320,8 @@ function initializeBusinessRoot(port: MessagePort): void {
   appInitialized = true;
   const services = connectViaMessagePort(port, {
     sourceServerManagementService: true,
+    // 桌面窗口 Host 注册了 window-controller；归档/置顶等组织写入必须走窗口聚合面。
+    windowControllerService: true,
   });
   baseServicesForRemoteSessions = services;
   registerBaseWorkspaceServices(services);

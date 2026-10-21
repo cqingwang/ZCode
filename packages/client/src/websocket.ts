@@ -18,6 +18,8 @@ export interface WebSocketConnectionCloseEvent {
 interface WebSocketConnectionOptions {
   onClose?: (event: WebSocketConnectionCloseEvent) => void;
   onOpenSocket?: (socket: WebSocket) => void;
+  /** 仅连接声明并提供窗口 Host 聚合面的 attachment 时开启。 */
+  windowControllerService?: boolean;
 }
 
 function wrapBrowserWebSocket(ws: WebSocket): ISocket {
@@ -94,14 +96,19 @@ export function connectViaWebSocket(
       settled = true;
       options?.onOpenSocket?.(ws);
       const socket = wrapBrowserWebSocket(ws);
-      resolve(connectViaProtocol(new SocketProtocol(socket)));
+      resolve(
+        connectViaProtocol(
+          new SocketProtocol(socket),
+          options?.windowControllerService ? { windowControllerService: true } : {},
+        ),
+      );
     });
   });
 }
 
 export function connectViaProtocol(
   protocol: IMessagePassingProtocol,
-  options: { windowProjectDirectory?: boolean } = {},
+  options: { windowProjectDirectory?: boolean; windowControllerService?: boolean } = {},
 ): IServiceAccessor {
   const client = new ChannelClient(protocol);
   return new RemoteServiceAccess(client, options);

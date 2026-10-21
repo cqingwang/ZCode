@@ -61,6 +61,9 @@ export async function connectWebRemoteControlWorkspaceBridgeServices(params: {
   try {
     const services = connectViaProtocol(params.relayProtocol.protocol, {
       windowProjectDirectory: params.windowProjectDirectory,
+      // 桌面窗口 Host 始终注册 window-controller；手机侧必须显式声明，
+      // 否则归档等组织写入会误落到惰性代理并以 Unknown channel 失败。
+      windowControllerService: params.windowProjectDirectory,
     });
     // 事件监听没有就绪回包。若先等待 RPC 再接入收帧，回复会落到旧 bridge 而永久等待。
     // 新导航或连接终止同时取消等待，迟到回复不能复活旧服务，也不回落 Source 目录。

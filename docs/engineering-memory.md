@@ -4,6 +4,52 @@
 
 ---
 
+## EM-2026-10-21-06：Web 端归档失败来自惰性 window-controller 代理
+
+- **日期**：2026-10-21
+- **作用域**：`packages/client/src/remoteServiceAccess.ts`、`packages/client/src/websocket.ts`、`packages/client/src/messageport.ts`、`packages/desktop/src/renderer/src/main.tsx`、`packages/web/src/web-remote-control/app/webRemoteControlWorkspaceBridgeSession.ts`
+- **适用版本**：官方 `offical/main` 3.16.2（`3c5b2276`）；Node 24.14.0
+
+### 症状 / 原始错误
+
+Web 服务中任意聊天点击“归档”，界面提示“归档任务失败”，服务日志出现：
+
+```text
+Unknown channel: window-controller
+```
+
+### 触发条件
+
+- 通过 Web `connectViaWebSocket` 连接独立 Server；
+- `RemoteServiceAccess` 无条件构造了 `windowControllerService` 的惰性 ProxyChannel；
+- 侧栏 `mutateProjectTask` 看到 controller 存在，优先走 `controller.mutateTask`，而独立 Server 没有注册 `window-controller` channel。
+
+### 根因
+
+ProxyChannel 是惰性的：属性存在不代表 Host 提供该能力。独立 Server 只注册任务服务，不注册窗口 Host 聚合面；Web 客户端却按桌面窗口能力优先路由，导致所有归档/置顶等组织写入在首次 RPC 时失败。
+
+### 最终修复
+
+1. `RemoteServiceAccess` 的 `windowControllerService` 改为可选，仅在显式声明能力时构造。
+2. 桌面 renderer 连接窗口 Host 时传 `windowControllerService: true`；桌面 Host 始终注册该 channel。
+3. Web 直连独立 Server 不声明该能力，`mutateProjectTask` 自动回落到 `zcodeTaskService.archiveTask`。
+4. 手机远控 bridge 仅在 Host 声明 `windowProjectDirectory` 时同时启用窗口 controller。
+
+### 回归测试路径与命令
+
+```bash
+pnpm exec vitest run \
+  packages/client/test/remoteServiceAccess.test.ts \
+  packages/ui/test/archiveManagement.test.ts
+```
+
+### 已排除方案
+
+- 在独立 Server 注册空的 `window-controller`：会伪造窗口能力，并让 controller 路由继续覆盖任务服务。
+- 在 `mutateProjectTask` 里按错误文本降级：把能力发现失败变成运行时兜底，无法阻止其它 controller RPC 继续误路由。
+
+---
+
 ## EM-2026-10-21-05：远端无项目会话统一落到默认工作区
 
 - **日期**：2026-10-21

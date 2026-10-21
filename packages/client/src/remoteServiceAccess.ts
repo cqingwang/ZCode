@@ -78,7 +78,13 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly credentialService: ICredentialService;
   readonly broadcastService: IBroadcastService;
   readonly zcodeTaskService: IZCodeTaskService;
-  readonly windowControllerService: IWindowControllerService;
+  /**
+   * 仅声明了窗口 Host 聚合能力的 attachment 才暴露。
+   *
+   * ProxyChannel 是惰性的：无条件构造会让 Web/远端 scope 误以为能力存在，
+   * 首次归档等操作才以 "Unknown channel: window-controller" 失败。
+   */
+  readonly windowControllerService?: IWindowControllerService;
   readonly zcodeAgentService: IZCodeAgentService;
   readonly zcodeSessionService: IZCodeSessionService;
   readonly taskGroupService: ITaskGroupService;
@@ -127,7 +133,11 @@ export class RemoteServiceAccess implements IServiceAccessor {
 
   constructor(
     channelClient: IChannelClient,
-    options: { sourceServerManagementService?: boolean; windowProjectDirectory?: boolean } = {},
+    options: {
+      sourceServerManagementService?: boolean;
+      windowProjectDirectory?: boolean;
+      windowControllerService?: boolean;
+    } = {},
   ) {
     // 远端工作区的 project 必须保留 Source 语义；只有显式能力才创建完整窗口目录组。
     if (options.windowProjectDirectory) {
@@ -178,9 +188,11 @@ export class RemoteServiceAccess implements IServiceAccessor {
     this.zcodeTaskService = ProxyChannel.toService<IZCodeTaskService>(
       channelClient.getChannel(IZCodeTaskService.channelName),
     );
-    this.windowControllerService = ProxyChannel.toService<IWindowControllerService>(
-      channelClient.getChannel(IWindowControllerService.channelName),
-    );
+    if (options.windowControllerService) {
+      this.windowControllerService = ProxyChannel.toService<IWindowControllerService>(
+        channelClient.getChannel(IWindowControllerService.channelName),
+      );
+    }
     this.zcodeAgentService = ProxyChannel.toService<IZCodeAgentService>(
       channelClient.getChannel(IZCodeAgentService.channelName),
     );

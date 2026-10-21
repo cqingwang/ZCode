@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IChannel, IChannelClient } from "@zcode/rpc";
-import { ISourceServerManagementService } from "@zcode/services";
+import { ISourceServerManagementService, IWindowControllerService } from "@zcode/services";
 import { RemoteServiceAccess } from "../src/remoteServiceAccess.js";
 
 const channel: IChannel = {
@@ -35,6 +35,19 @@ describe("RemoteServiceAccess optional channels", () => {
 
     expect(services.sourceServerManagementService).toBeUndefined();
     expect(getChannel).not.toHaveBeenCalledWith(ISourceServerManagementService.channelName);
+  });
+
+  it("only constructs the window controller proxy when the attachment declares it", () => {
+    const getChannel = vi.fn(() => channel);
+    const legacy = new RemoteServiceAccess({ getChannel } as IChannelClient);
+    expect(legacy.windowControllerService).toBeUndefined();
+    expect(getChannel).not.toHaveBeenCalledWith(IWindowControllerService.channelName);
+
+    const windowHost = new RemoteServiceAccess({ getChannel } as IChannelClient, {
+      windowControllerService: true,
+    });
+    expect(windowHost.windowControllerService).toBeDefined();
+    expect(getChannel).toHaveBeenCalledWith(IWindowControllerService.channelName);
   });
 });
 

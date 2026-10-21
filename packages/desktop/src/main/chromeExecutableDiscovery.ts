@@ -254,6 +254,9 @@ export async function resolveChromeExecutablePath(
   options: ChromeExecutableDiscoveryOptions = {},
 ): Promise<string | null> {
   const platform = options.platform ?? process.platform;
+  // 非支持平台没有 Chrome 安装约定；不能落入 Linux 候选，否则宿主机恰好装了
+  // /usr/bin/google-chrome 时会把“不支持平台”误报成可用环境。
+  if (!SUPPORTED_PLATFORMS.has(platform)) return null;
   const env = options.env ?? process.env;
   const commandLines =
     options.processCommandLines ??

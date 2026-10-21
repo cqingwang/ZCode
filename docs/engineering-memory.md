@@ -4,6 +4,61 @@
 
 ---
 
+## EM-2026-10-21-08：不支持平台误走 Linux Chrome 探测导致单测依赖宿主环境
+
+- **日期**：2026-10-21
+- **作用域**：`packages/desktop/src/main/chromeExecutableDiscovery.ts`
+- **适用版本**：官方 `offical/main` 3.16.2（`3c5b2276`）；Node 24.14.0
+
+### 症状 / 原始错误
+
+`browserDataManager.test.ts` 中“先复制 LocalStorage 快照，再从快照发现 origin”
+在装有 `/usr/bin/google-chrome` 的 Linux 宿主上稳定失败：
+
+```text
+AssertionError: expected { originsImported: +0, …(3) } to match object { originsImported: +0, …(2) }
+- "error": "chrome_executable_not_found",
+- "originsFailed": 1,
++ "originsFailed": 0,
+```
+
+该用例以 `platform: "aix"` 断言“不支持的平台找不到 Chrome”，但实际探测到了宿主机的
+Linux Chrome，随后继续执行 CDP 导入并返回 `originsFailed: 0`。
+
+### 触发条件
+
+- 测试或调用方传入 `darwin`、`linux`、`win32` 之外的平台；
+- 宿主机恰好存在 Linux 标准路径下的 Chrome/Chromium。
+
+### 根因
+
+`resolveChromeExecutablePath` 只对进程枚举做了平台白名单，候选安装目录仍由
+`buildStandardChromeInstallations` 生成；后者把所有非 macOS/Windows 平台都按 Linux
+处理，因此不支持的平台会检查 `/usr/bin/google-chrome` 等路径。
+
+### 最终修复
+
+在 `resolveChromeExecutablePath` 入口对不支持平台直接返回 `null`，与进程枚举的
+`SUPPORTED_PLATFORMS` 白名单保持一致；不改变三大平台的发现顺序和候选来源。
+
+### 回归测试路径与命令
+
+```bash
+pnpm exec vitest run \
+  packages/desktop/test/browserDataManager.test.ts \
+  packages/desktop/test/chromeProfileDiscovery.test.ts
+```
+
+新增“不支持平台不探测 Linux 标准路径”用例：修复前因宿主 Chrome 存在而失败，
+修复后 44/44 通过。
+
+### 已排除方案
+
+- 修改测试断言接受 `originsFailed: 0`：会掩盖不支持平台仍执行 Chrome 导入的事实。
+- 在测试里清空 `PATH`：标准安装路径不依赖 `PATH`，无法隔离宿主环境。
+
+---
+
 ## EM-2026-10-21-07：分组首发失败来自客户端 local 默认 Host 与持库 Host 不一致
 
 - **日期**：2026-10-21

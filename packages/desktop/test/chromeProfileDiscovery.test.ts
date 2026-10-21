@@ -377,4 +377,23 @@ describe("chromeProfileDiscovery", () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it("不支持平台不探测 Linux 标准路径", async () => {
+    const executablePath = join(tempRoot, "bin", "google-chrome");
+    await mkdir(join(tempRoot, "bin"), { recursive: true });
+    await writeFile(executablePath, "#!/bin/sh\n");
+    await chmod(executablePath, 0o755);
+
+    await expect(
+      resolveChromeExecutablePath({
+        platform: "aix",
+        env: { PATH: "" },
+        installations: [
+          { browser: "chrome", executablePath, executablePaths: [], userDataDir: tempRoot },
+        ],
+        processCommandLines: [],
+        registeredExecutablePaths: [],
+      }),
+    ).resolves.toBeNull();
+  });
 });

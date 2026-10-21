@@ -20,6 +20,8 @@ readDirectory 是项目选目录的 Host 路由入口：未指定 path 返回所
 
 远端持库 Host 的“不在项目中工作”仍使用 `~/.zcode/workspace/default` 作为唯一默认目录。prepareSession 在该路径无 projectId 时幂等创建/复用 root 固定的普通默认项目，但返回 `projectId=null` 以保持 UI 语义；创建会话时由 Host 的 prepareSessionCreation 解析默认项目并写入归属。默认项目遵守远端单 root、cwd 归属和附加目录约束，不为该目录放宽 remote-policy。历史无归属的默认目录任务在首次解析或恢复时并入默认项目，只补组织归属，不改 CLI 事实、cwd、归档/置顶/未读或执行目录；其他无项目路径仍拒绝。
 
+直连客户端（Web `/ws`）没有 workspaceIdentity 时，Composer 的默认 `hostId=local` 表示当前连接的 Host。持库 Host 非 local 时，项目服务只把这个默认 `local` 归一为持库 Host；显式远程 Host 仍必须由现有连接解析，缺失继续返回 `project.host-offline`，不把离线 Host 静默改路由到持库仓储。
+
 ## 2026-10-10 远程单目录合同
 
 本地仍允许 0..n roots；可信 ownerHostId 非 local 的持库宿主只允许恰好一个固定 root。远程创建必须有项目，prepareSession、reserveCreatedTask 与 moveTask 不得产生无归属或附加目录；根路径更新和缺 root 拖动在写事务中拒绝。客户端 hostId 不能改变持库身份。历史迁移数据不被裁剪，失败不得部分写入。

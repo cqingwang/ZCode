@@ -72,10 +72,53 @@ it("rejects remote unclassified and empty-project creation before allocating a d
     await expect(service.prepareSession({ projectId: project.id })).rejects.toThrow(
       "project.remote-single-root-required",
     );
+    // 直连客户端的 local 默认值表示当前持库 Host，不是另一台本机 Host；仍按远端单 root 约束拒绝。
     await expect(
       service.prepareSession({ hostId: "local", projectId: project.id }),
-    ).rejects.toThrow("project.host-offline");
+    ).rejects.toThrow("project.remote-single-root-required");
     expect(initializeProjectRoot).not.toHaveBeenCalled();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("normalizes the client local host to the remote storage owner for existing sessions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "remote-local-host-"));
+  const project = {
+    id: "p",
+    hostId: "remote:server:s",
+    roots: [{ rootPath: root, isPrimary: true, position: 0 }],
+  } as VirtualProject;
+  const resolveSessionDirectories = vi.fn(() => ({
+    projectId: project.id,
+    workspacePath: root,
+    additionalDirectories: [],
+  }));
+  const resolveHost = vi.fn();
+  const service = createProjectService({
+    ownerHostId: project.hostId,
+    workspaceDirectory: root,
+    resolveHost,
+    repository: async () =>
+      ({
+        readTree: () => ({ projects: [project], tasks: [] }),
+        resolveSessionDirectories,
+      }) as unknown as ProjectRepositoryContract,
+  });
+  try {
+    // Web 直连没有 workspaceIdentity，Composer 默认 hostId=local；必须命中持库 Host 的仓储。
+    await expect(
+      service.resolveSessionDirectories({ workspacePath: root, taskId: "session-1" }, "local"),
+    ).resolves.toEqual({
+      projectId: project.id,
+      workspacePath: root,
+      additionalDirectories: [],
+    });
+    expect(resolveSessionDirectories).toHaveBeenCalledWith({
+      workspacePath: root,
+      taskId: "session-1",
+    });
+    expect(resolveHost).not.toHaveBeenCalled();
   } finally {
     await rm(root, { recursive: true, force: true });
   }

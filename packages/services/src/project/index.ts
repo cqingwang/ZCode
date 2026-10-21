@@ -88,15 +88,28 @@ export function createProjectService(options: {
   resolveHost?: (hostId: string) => Promise<IProjectService>;
   afterChange?: () => Promise<void>;
 }): IProjectService {
+  const ownerHostId = options.ownerHostId?.trim() || "local";
+  /**
+   * 直连客户端（Web `/ws`）没有 workspaceIdentity，Composer 的默认 hostId 是 `local`。
+   * 在独立 Server 上 `local` 表示“当前连接的 Host”，不是另一台本机 Host；若不归一，
+   * 已有会话续聊会在 resolveSessionDirectories 被误判为外部 Host 并报 project.host-offline。
+   * 只归一 `local` 默认值，显式远程 Host 仍走 resolveHost，保持跨 Host 隔离。
+   */
+  const normalizeHostId = (hostId?: string): string | undefined => {
+    const requested = hostId?.trim();
+    if (!requested) return undefined;
+    return requested === "local" && ownerHostId !== "local" ? ownerHostId : requested;
+  };
   const route = async (hostId?: string) => {
-    if (!hostId || hostId === (options.ownerHostId ?? "local")) return null;
+    const resolvedHostId = normalizeHostId(hostId);
+    if (!resolvedHostId || resolvedHostId === ownerHostId) return null;
     if (!options.resolveHost) throw new Error("project.host-offline");
-    return options.resolveHost(hostId);
+    return options.resolveHost(resolvedHostId);
   };
   const creationFlights = new Map<string, Promise<ProjectDirectories>>();
   let defaultProjectFlight: Promise<VirtualProject> | null = null;
   let defaultProjectAdopted = false;
-  const remoteOwner = Boolean(options.ownerHostId && options.ownerHostId !== "local");
+  const remoteOwner = ownerHostId !== "local";
   const changed = async () => {
     await options.afterChange?.();
   };
@@ -205,6 +218,8 @@ export function createProjectService(options: {
     },
     async saveProject(input) {
       input = saveProjectSchema.parse(input);
+      // 与路由同一归一规则：持库 Host 上客户端传 local 时不能把本地默认值当成跨 Host 写入。
+      if (input.hostId) input = { ...input, hostId: normalizeHostId(input.hostId) };
       const remote = await route(input.hostId);
       if (remote) return remote.saveProject(input);
       const roots = input.roots

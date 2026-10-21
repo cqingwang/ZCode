@@ -4,6 +4,70 @@
 
 ---
 
+## EM-2026-10-21-09：Web 直连独立 Server 续聊报 project.host-offline
+
+- **日期**：2026-10-21
+- **作用域**：`packages/services/src/project/index.ts`
+- **适用版本**：官方 `offical/main` 3.16.2（`3c5b2276`）；Node 24.14.0
+
+### 症状 / 原始错误
+
+通过 Web 直连独立 Server，在已存在的会话中继续回复消息，界面提示
+“发送失败，请稍后重试”，详情为 `project.host-offline`。服务日志：
+
+```text
+[rpc:call] project.resolveSessionDirectories FAIL (0.1ms) Error: project.host-offline
+    at route (.../entry-http.js)
+    at Object.resolveSessionDirectories (.../entry-http.js)
+```
+
+### 触发条件
+
+- 独立 Server 的持库 Host 为 `remote:server:<id>`；
+- 浏览器通过 `/ws` 直连 Server，没有 `workspaceIdentity`；
+- 在已有会话中发送消息，`SessionPane` 查询 Recent 归属时调用
+  `project.resolveSessionDirectories(task, hostId)`；
+- Composer scope 在无 identity 时默认 `hostId: "local"`。
+
+### 根因
+
+`createProjectService.route` 把任何不等于持库 Host 的 `hostId` 都当作外部 Host；
+独立 Server 没有 `resolveHost`，于是把客户端表示“当前连接 Host”的 `local` 默认值
+误判为另一台本机 Host，直接抛出 `project.host-offline`。消息发送链路在 Recent
+归属查询之后才提交，因此用户看到的是发送失败。
+
+### 最终修复
+
+1. 在 `createProjectService` 内集中归一 Host：持库 Host 非 `local` 时，把无
+   `workspaceIdentity` 场景的默认 `local` 归一为持库 Host。
+2. `route`、`prepareSession`、`ensureDefaultProject`、`resolveSessionDirectories`
+   共用同一归一入口；`saveProject` 同步归一，避免仓储的 host-immutable 校验误拒绝。
+3. 显式其他 Host 仍必须由 `resolveHost` 解析，缺失继续 fail-fast，不放宽跨 Host
+   隔离，也不把离线 Host 静默改路由到持库仓储。
+
+### 回归测试路径与命令
+
+```bash
+pnpm exec vitest run \
+  packages/services/src/project/contract.test.ts \
+  packages/services/src/project/preparation-race/contract.test.ts
+pnpm typecheck
+pnpm lint
+pnpm architecture:check --changed
+```
+
+新增“客户端 local 归一为远端持库 Host”用例：修复前 `resolveHost` 被调用并抛
+`project.host-offline`，修复后命中持库仓储且不调用 `resolveHost`；15/15 通过。
+
+### 已排除方案
+
+- 在 UI 的 `resolveSessionDirectories` 前手工把 `local` 改成持库 Host：同一默认值
+  还会进入 `prepareSession`、`saveProject` 等入口，只修一条调用链会继续漂移。
+- 放宽 `route` 接受任意 `hostId`：会破坏真实跨 Host 隔离，并让离线 Host 误路由。
+- 吞掉 `project.host-offline`：会把能力/路由错误变成静默成功。
+
+---
+
 ## EM-2026-10-21-08：不支持平台误走 Linux Chrome 探测导致单测依赖宿主环境
 
 - **日期**：2026-10-21

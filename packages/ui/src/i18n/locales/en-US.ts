@@ -2291,6 +2291,7 @@ const enUS: Record<string, string> = {
   "workspaceSidebar.unavailableLocalDirectory":
     "The workspace directory does not exist or cannot be accessed. You can only view history for now. Restore the directory and restart ZCode to continue.",
   "workspaceSidebar.toggleSidebar": "Toggle sidebar",
+  "workspaceSidebar.showSidebar": "Show sidebar",
   "workspaceSidebar.resizeSidebar": "Resize sidebar",
   "workspaceSidebar.showFileTree": "Show files",
   "workspaceFileTree.title": "Workspace",

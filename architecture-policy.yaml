@@ -732,6 +732,19 @@ modules:
     layers:
       ui: .
     owner: conversation
+  # workspace-sidebar-extensions：本地侧栏收起/展开增强，官方无对应实现。
+  - id: workspace-sidebar-extensions
+    roots:
+      - packages/ui/src/workspace-sidebar-extensions
+    managed: true
+    requires:
+      - ui
+    publicEntrypoints:
+      - packages/ui/src/workspace-sidebar-extensions/index.ts
+      - packages/ui/src/workspace-sidebar-extensions/contract.ts
+    layers:
+      ui: .
+    owner: ui-shell
 
 global:
   # 临时时间戳（2026-09-10）：unmanaged-new-file 只约束此日期之后首次入库的文件。

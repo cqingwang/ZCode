@@ -2122,6 +2122,7 @@ const zhCN: Record<string, string> = {
   "workspaceSidebar.unavailableLocalDirectory":
     "工作区目录不存在或无法访问，当前仅可查看历史记录。恢复该目录后重启 ZCode 即可继续使用。",
   "workspaceSidebar.toggleSidebar": "切换侧边栏",
+  "workspaceSidebar.showSidebar": "展开侧边栏",
   "workspaceSidebar.resizeSidebar": "调整侧边栏宽度",
   "workspaceSidebar.showFileTree": "查看文件",
   "workspaceFileTree.title": "Workspace",

@@ -44,6 +44,11 @@ import {
 import { requestV4ComposerDraftWorkspaceTransfer } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { ProjectComposerMenu, ProjectDirectoryProvider } from "@/project-sidebar/index.js";
 import { DesktopTopOverlay } from "@/DesktopTopOverlay.js";
+import {
+  WorkspaceSidebarCollapseLayer,
+  resolveWorkspaceSidebarPanelOverlayClassName,
+  useWorkspaceSidebarOverlay,
+} from "@/workspace-sidebar-extensions/index.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { WorkspacePluginPreview } from "@/workspace-plugin-preview/index.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -449,7 +454,14 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
   const workspaceResizeHandleInsetPx = resolveWorkspaceShellResizeHandleInsetPx(
     workspaceShellRadiusOptions,
   );
-  const collapsedSidebarWidthPx = hasDesktopPanelInset ? (isWindowsDesktop ? 6 : 4) : 0;
+  // 抽拉侧栏：移动端屏幕下侧栏走覆盖层，收起时完全不占布局，展开时也不挤压会话区。
+  // 远控壳在移动端把侧栏改造成顶部导航，不能复用普通 Web 的抽屉覆盖层。
+  const { isSidebarMobileViewport, isSidebarOverlayMode, collapsedSidebarWidthPx } =
+    useWorkspaceSidebarOverlay({
+      isWebRemoteControlShell,
+      hasDesktopPanelInset,
+      isWindowsDesktop,
+    });
   const [isWebRemoteControlNavigationCollapsed, setIsWebRemoteControlNavigationCollapsed] =
     useState(() => (isWebRemoteControlShell ? consumeWebRemoteControlCollapseIntent() : false));
   const [webRemoteControlNavigationHeightPx, setWebRemoteControlNavigationHeightPx] = useState(
@@ -2280,6 +2292,10 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                   : "max-md:!h-0 max-md:!min-h-0 max-md:!w-full max-md:!max-w-none max-md:!flex-none max-md:!basis-0 max-md:!border-b-0",
               ),
             isSidebarPanelVisible ? "opacity-100" : "pointer-events-none opacity-0",
+            resolveWorkspaceSidebarPanelOverlayClassName({
+              isOverlayMode: isSidebarOverlayMode,
+              isSidebarPanelVisible,
+            }),
           )}
         >
           {/* Bugfix: 折叠远控顶部导航时保持组件挂载，避免展开后整块 sidebar 重新加载。 */}
@@ -2310,7 +2326,16 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
           </aside>
         </div>
 
-        {isSidebarPanelVisible && renderWebRemoteNavigationPanel ? (
+        <WorkspaceSidebarCollapseLayer
+          isOverlayMode={isSidebarOverlayMode}
+          isSidebarMobileViewport={isSidebarMobileViewport}
+          isSidebarVisible={isSidebarVisible}
+          isWebRemoteControlShell={isWebRemoteControlShell}
+          onToggleSidebar={handleToggleSidebar}
+          toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
+        />
+
+        {isSidebarPanelVisible && !isSidebarOverlayMode && renderWebRemoteNavigationPanel ? (
           <div
             role="separator"
             tabIndex={0}
@@ -2334,7 +2359,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
             )}
           />
         ) : null}
-        {isSidebarPanelVisible && renderWebRemoteNavigationPanel ? (
+        {isSidebarPanelVisible && !isSidebarOverlayMode && renderWebRemoteNavigationPanel ? (
           // 原因：侧栏 overflow 裁掉横线末端；延伸装饰放在共同布局容器，不改变拖拽命中区。
           <span
             aria-hidden="true"
@@ -2757,6 +2782,9 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
             canGoForward={canGoForward}
             showNewTaskButton={showTopOverlayNewTaskButton}
             appLogoUrl={appLogoUrl}
+            // 抽屉展开时抬到抽屉之上：左上角浮层按钮（后退/前进）此前就绘制在侧栏顶部拖拽区之上，
+            // 抽屉抬到 z-40 后若不联动，移动端展开态会突然丢掉这两个入口。
+            className={isSidebarOverlayMode && isSidebarVisible ? "z-50" : undefined}
             platform={platform}
             onToggleSidebar={handleToggleSidebar}
             onCreateTask={handleCreateTaskInChat}

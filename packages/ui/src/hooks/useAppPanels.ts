@@ -19,6 +19,7 @@ import {
   saveTaskSidePaneCollapsedPreference,
   saveTaskSidePaneMemoryState,
 } from "@/lib/taskSidePaneMemory.js";
+import { useWorkspaceSidebarVisibility } from "@/workspace-sidebar-extensions/index.js";
 import {
   ensureSidePaneTab,
   closeSidePaneTab,
@@ -213,7 +214,7 @@ export function useAppPanels(options: {
   // 交互说明：侧栏显隐按钮放在 App 外层，而不是 Sidebar 内部。
   // 这样即使侧栏被隐藏，入口也仍然留在左上角，不会出现"收起后没有地方再展开"的问题；
   // 同时这里统一处理 macOS 红绿灯安全区，避免按钮和系统窗口控件重叠。
-  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const { isSidebarVisible, handleToggleSidebar } = useWorkspaceSidebarVisibility();
   const [browserNavigationRequest, setBrowserNavigationRequest] =
     useState<BrowserNavigationRequest | null>(null);
   const [allRecentClosedSidePaneTabs, setAllRecentClosedSidePaneTabs] = useState<
@@ -1348,10 +1349,6 @@ export function useAppPanels(options: {
       return nextOpen;
     });
   }, [isOfficeMode, workspaceAbsPath]);
-
-  const handleToggleSidebar = useCallback(() => {
-    setIsSidebarVisible((visible) => !visible);
-  }, []);
 
   const handleToggleSidePaneCollapse = useCallback(() => {
     const nextCollapsed = !latestSidePaneMemoryRef.current.isSidePaneCollapsed;

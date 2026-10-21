@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { git, run } from "./process.mjs";
+import { selectClosestDefaultBranch } from "../affected-unit-test-baseline.mjs";
 
 async function commit(root, ref) {
   try {
@@ -29,9 +30,14 @@ async function resolvePushBase(root, head, remote) {
 }
 
 async function firstPushBase(root, head) {
-  // 首次推送没有 remote SHA；只使用已确认的集成分支，缺失时严格报错，不猜测其他分支。
-  const staging = await commit(root, "origin/staging");
-  return (await git(root, ["merge-base", staging, head])).toString().trim();
+  // 首次推送没有 remote SHA；在多个远端默认分支中选择与 HEAD 最近的共同祖先。
+  // 不能固定 origin/staging：个人 fork 可能没有 staging，而官方源才是实际基线。
+  const selected = await selectClosestDefaultBranch(root, { head });
+  if (!selected)
+    throw new Error(
+      "无法解析默认分支基线：请先 fetch 至少一个 main/master/staging 远端分支，或用 --base 指定",
+    );
+  return selected.mergeBase;
 }
 
 /** 只解析比较基线；改动文件与关联测试全部由 Vitest 官方选择。 */

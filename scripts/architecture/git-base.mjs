@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { selectDefaultBranchRef } from "../affected-unit-test-baseline.mjs";
+import { selectClosestDefaultBranch } from "../affected-unit-test-baseline.mjs";
 import { gitFileNames } from "./git-file-names.mjs";
 import { applyUpstreamAdmission } from "./upstream-admission.mjs";
 
@@ -91,27 +91,10 @@ export async function resolveDiffBase(
   ]);
   const viaUpstream = upstream && (await pick(upstream, `upstream ${upstream}`, true));
   if (viaUpstream) return viaUpstream;
-  // 架构检查优先 origin/staging，其次 origin/HEAD；
-  // 否则长期分支会把 staging 尚未合入 main 的历史差异误算成本分支新增。
-  const originHead =
-    (await gitOut(cwd, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])) ?? null;
-  const existing = new Set();
-  for (const ref of [
-    "origin/staging",
-    originHead,
-    "origin/main",
-    "origin/master",
-    "main",
-    "master",
-  ]) {
-    if (ref && (await hasCommit(cwd, ref))) existing.add(ref);
-  }
-  const ref = selectDefaultBranchRef({
-    originHead,
-    hasCommit: (candidate) => existing.has(candidate),
-  });
-  const viaDefault = ref && (await pick(ref, ref, true));
-  if (viaDefault) return viaDefault;
+  // 多远端仓库（例如 origin 为个人 fork、offical 为官方源）不能固定选 origin/main。
+  // 选择与 HEAD 共同祖先最近的默认分支，避免把另一条历史误算成本分支新增。
+  const selected = await selectClosestDefaultBranch(cwd);
+  if (selected) return { base: selected.mergeBase, label: `merge-base ${selected.ref}` };
   return { base: "HEAD", label: "HEAD (仅工作树差异；未找到远端基线)" };
 }
 

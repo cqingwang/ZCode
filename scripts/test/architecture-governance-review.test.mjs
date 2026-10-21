@@ -318,6 +318,34 @@ test("diff base prefers explicit, then CI, then pre-push stdin, then default bra
   });
 });
 
+test("default branch base chooses the closest remote history instead of a stale fork", async () => {
+  await fixture({ "a.ts": "export {};\n" }, async (cwd) => {
+    await initializeGit(cwd);
+    await git(cwd, "add", "a.ts");
+    await git(cwd, "-c", "core.hooksPath=", "commit", "-m", "base");
+    const baseSha = (await git(cwd, "rev-parse", "HEAD")).stdout.trim();
+    await git(cwd, "branch", "-M", "main");
+    await git(cwd, "remote", "add", "origin", "https://example.invalid/origin.git");
+    await git(cwd, "remote", "add", "offical", "https://example.invalid/offical.git");
+    // origin 是落后的个人 fork；offical 才是当前分支实际基于的官方历史。
+    await git(cwd, "update-ref", "refs/remotes/origin/main", baseSha);
+    await git(cwd, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    await writeFile(join(cwd, "official.ts"), "export {};\n");
+    await git(cwd, "add", "official.ts");
+    await git(cwd, "-c", "core.hooksPath=", "commit", "-m", "official update");
+    const officialSha = (await git(cwd, "rev-parse", "HEAD")).stdout.trim();
+    await git(cwd, "update-ref", "refs/remotes/offical/main", officialSha);
+    await git(cwd, "checkout", "-b", "release/deploy");
+    await writeFile(join(cwd, "feature.ts"), "export {};\n");
+    await git(cwd, "add", "feature.ts");
+    await git(cwd, "-c", "core.hooksPath=", "commit", "-m", "feature");
+
+    const selected = await resolveDiffBase(cwd, { env: {} });
+    assert.equal(selected.base, officialSha);
+    assert.match(selected.label, /offical\/main/);
+  });
+});
+
 test("adopt scaffolds the five artifacts, registers the module and infers requires", async () => {
   await fixture(
     {

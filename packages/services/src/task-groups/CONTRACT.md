@@ -5,6 +5,9 @@ CLI 和远端项目服务不接收 Group。结构读取无副作用，任务内�
 
 move 是单节点相对位置命令：来源和目标锚点在事务中复检，不以可见快照覆盖全库。
 所有引用按 canonical workspace identity 与 taskId 隔离，服务校验 Host 身份和任务事实。
+Web 直连独立 Server 时客户端可能没有 workspaceIdentity，并把 Host 默认成 local；
+持库 Host 非 local 时，服务端只把这种无 identity 的 local 默认值归一为持库 Host。
+显式 workspaceIdentity 仍必须与 hostId 一致，真实跨 Host 引用不会被改写。
 远端离线不删成员，不通过分组服务建立连接。取消组保留全部任务及成员顺序。
 
 admit 只登记首次出现或首次系统类型标记；独立加法表记录是否已被用户整理和创建 receipt，

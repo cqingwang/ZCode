@@ -2186,6 +2186,7 @@ export function createLocalServices(options: {
     afterChange: publishProjectChange,
   });
   const taskGroupService = createTaskGroupService({
+    ownerHostId: options?.projectStorageHostId,
     database: () => taskIndexRepo.getOrganizationDatabase(),
     resolveTasks: async (refs) => {
       // 只读所属 Host 的权威目录；项目路由不会为分组建立连接或启动 Agent。

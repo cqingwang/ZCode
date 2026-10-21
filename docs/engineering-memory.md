@@ -4,6 +4,66 @@
 
 ---
 
+## EM-2026-10-21-07：分组首发失败来自客户端 local 默认 Host 与持库 Host 不一致
+
+- **日期**：2026-10-21
+- **作用域**：`packages/services/src/task-groups/`、`packages/services/src/node.ts`
+- **适用版本**：官方 `offical/main` 3.16.2（`3c5b2276`）；Node 24.14.0
+
+### 症状 / 原始错误
+
+在 Web 的“按分组”视图选择分组后新建任务并发送消息，消息实际发送成功，但界面提示
+“分组操作失败，请重试”。服务日志出现：
+
+```text
+task-groups.admit FAIL ZodError: task-group.host-identity-mismatch
+task-groups.admit FAIL Error: project.host-offline
+```
+
+### 触发条件
+
+- 通过 Web 直连独立 Server，持库 Host 为 `remote:server:<id>`；
+- 任务索引中的历史任务 `workspace_identity` 为空；
+- 前端新建任务提交分组时没有 `workspaceIdentity`，按现有规则默认 `hostId: "local"`；
+- 侧栏批量登记把无 identity 的任务以持库 Host 发出，但校验仍按 identity 推导 `local`。
+
+### 根因
+
+分组服务把“没有 workspaceIdentity”等同于 `local`，而独立 Server 的项目仓储 owner 是
+`remote:server:<id>`。于是同一份默认工作区任务出现两种身份：
+
+- 新建 placement 以 `hostId: "local"` 进入 `readTree`，被 `project.host-offline` 拒绝；
+- 批量登记以 `hostId: "remote:server:<id>"` 进入 Zod refine，被推导出的 `local` 拒绝。
+
+消息发送链路在分组提交之前完成，因此组织失败只弹 toast，不回滚已经发送的消息。
+
+### 最终修复
+
+1. `createTaskGroupService` 注入持库 `ownerHostId`。
+2. 仅当引用没有 `workspaceIdentity` 且 `hostId === "local"` 时，把 Host 归一为持库 Host。
+3. 显式 `workspaceIdentity` 仍必须与 `hostId` 一致；真实其他 Host 的引用不被改写。
+4. 无 identity 的引用只允许指向持库 Host，不放宽跨 Host 校验。
+5. `admit` 的 tasks/placement 与 `move` 的 node/anchor 共用同一归一化与校验路径。
+
+### 回归测试路径与命令
+
+```bash
+pnpm exec vitest run packages/services/src/task-groups/contract.test.ts
+pnpm typecheck
+pnpm lint
+pnpm architecture:check --changed --base offical/main
+```
+
+修复前新增用例 2 个失败（`local` 未归一、持库 Host 无 identity 被拒绝），修复后 14/14 通过。
+
+### 已排除方案
+
+- 只在前端补 `workspaceIdentity`：历史行本身没有 identity，且不同连接方式仍会漂移。
+- 放宽为任意 `hostId` 都接受：会破坏真实跨 Host 隔离，并让离线 Host 误路由到持库 Host。
+- 在 `resolveTasks` 里吞掉 `project.host-offline`：会把能力/路由错误变成静默成功。
+
+---
+
 ## EM-2026-10-21-06：Web 端归档失败来自惰性 window-controller 代理
 
 - **日期**：2026-10-21

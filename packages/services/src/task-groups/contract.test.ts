@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runTasksDatabaseMigrations } from "#src/session/tasksDatabase/migrations.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -182,6 +182,88 @@ it("rejects a mismatched authority result even when the task count matches", asy
     service.move({ node: taskNode(task("requested")), sourceGroupId: null, groupId: group.id }),
   ).rejects.toThrow("unavailable");
   expect(repo.read().members).toEqual([]);
+});
+it("normalizes the client local default to the owning host without an identity", async () => {
+  const { db, repo } = await fixture();
+  const group = repo.save({ title: "Target" });
+  const ownerHostId = "remote:server:owner";
+  const ref: GroupTaskRef = { taskId: "new", hostId: "local", workspacePath: "/repo" };
+  const resolveTasks = vi.fn(async (refs: GroupTaskRef[]) => refs.map((task) => ({ ...task })));
+  const service = createTaskGroupService({
+    ownerHostId,
+    database: async () => db,
+    resolveTasks,
+    afterChange: async () => {},
+  });
+  await service.admit({
+    tasks: [ref],
+    placement: { task: ref, groupId: group.id, creationId: "create" },
+  });
+  expect(resolveTasks).toHaveBeenCalledWith([{ ...ref, hostId: ownerHostId }]);
+  expect(repo.read().members).toMatchObject([
+    { groupId: group.id, workspaceKey: "/repo", taskId: "new" },
+  ]);
+});
+it("accepts owner-host refs without identity and preserves explicit foreign hosts", async () => {
+  const { db } = await fixture();
+  const ownerHostId = "remote:server:owner";
+  const ownerRef: GroupTaskRef = { taskId: "owner", hostId: ownerHostId, workspacePath: "/repo" };
+  const foreignRef: GroupTaskRef = {
+    taskId: "foreign",
+    hostId: "remote:server:other",
+    workspacePath: "/repo",
+    workspaceIdentity: "remote:server:other:/repo",
+  };
+  const resolveTasks = vi.fn(async (refs: GroupTaskRef[]) => refs.map((task) => ({ ...task })));
+  const service = createTaskGroupService({
+    ownerHostId,
+    database: async () => db,
+    resolveTasks,
+    afterChange: async () => {},
+  });
+  await service.admit({ tasks: [ownerRef, foreignRef] });
+  expect(resolveTasks).toHaveBeenCalledWith([ownerRef, foreignRef]);
+});
+it("still rejects an explicit identity that disagrees with the host", async () => {
+  const { db } = await fixture();
+  const resolveTasks = vi.fn(async (refs: GroupTaskRef[]) => refs.map((task) => ({ ...task })));
+  const service = createTaskGroupService({
+    ownerHostId: "remote:server:owner",
+    database: async () => db,
+    resolveTasks,
+    afterChange: async () => {},
+  });
+  await expect(
+    service.admit({
+      tasks: [
+        {
+          taskId: "wrong",
+          hostId: "local",
+          workspacePath: "/repo",
+          workspaceIdentity: "remote:server:other:/repo",
+        },
+      ],
+    }),
+  ).rejects.toThrow("task-group.host-identity-mismatch");
+  expect(resolveTasks).not.toHaveBeenCalled();
+});
+it("keeps the legacy local meaning for a non-remote explicit identity", async () => {
+  const { db } = await fixture();
+  const ref: GroupTaskRef = {
+    taskId: "local-identity",
+    hostId: "local",
+    workspacePath: "/repo",
+    workspaceIdentity: "stable-workspace-key",
+  };
+  const resolveTasks = vi.fn(async (refs: GroupTaskRef[]) => refs.map((task) => ({ ...task })));
+  const service = createTaskGroupService({
+    ownerHostId: "remote:server:owner",
+    database: async () => db,
+    resolveTasks,
+    afterChange: async () => {},
+  });
+  await service.admit({ tasks: [ref] });
+  expect(resolveTasks).toHaveBeenCalledWith([ref]);
 });
 it("initial discovery keeps newest-created tasks first without reordering known tasks", async () => {
   const { repo, task } = await fixture();

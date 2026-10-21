@@ -80,3 +80,66 @@ it("rejects remote unclassified and empty-project creation before allocating a d
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("maps a remote unclassified session onto the configured default project", async () => {
+  const root = await mkdtemp(join(tmpdir(), "remote-default-project-"));
+  const defaultRoot = join(root, ".zcode", "workspace", "default");
+  const defaultProject = {
+    id: "default",
+    hostId: "remote:server:s",
+    roots: [{ rootPath: defaultRoot, isPrimary: true, position: 0 }],
+  } as VirtualProject;
+  const readTree = vi
+    .fn()
+    .mockReturnValueOnce({ projects: [], tasks: [] })
+    .mockReturnValue({
+      projects: [defaultProject],
+      tasks: [
+        {
+          taskId: "legacy-chat",
+          workspacePath: defaultRoot,
+          projectId: null,
+          hostId: defaultProject.hostId,
+        },
+      ],
+    });
+  const saveProject = vi.fn(() => defaultProject);
+  const moveTask = vi.fn();
+  const service = createProjectService({
+    ownerHostId: defaultProject.hostId,
+    workspaceDirectory: root,
+    defaultProjectRoot: defaultRoot,
+    repository: async () =>
+      ({ readTree, saveProject, moveTask }) as unknown as ProjectRepositoryContract,
+  });
+  try {
+    // 默认工作区由服务幂等创建，用户无需先手动建目录。
+    await expect(service.prepareSession()).resolves.toEqual({
+      // UI 仍按“不在项目中工作”展示；落库归属由创建入口补默认项目。
+      projectId: null,
+      workspacePath: defaultRoot,
+      additionalDirectories: [],
+    });
+    expect(saveProject).toHaveBeenCalledWith({ roots: [defaultRoot], name: "default" });
+    // 历史无归属任务复用既有 moveTask 并入默认项目，不改 cwd。
+    expect(moveTask).toHaveBeenCalledWith({
+      task: { taskId: "legacy-chat", workspacePath: defaultRoot },
+      projectId: defaultProject.id,
+    });
+    // 再次调用复用同一默认项目，不重复创建。
+    await service.prepareSession();
+    expect(saveProject).toHaveBeenCalledTimes(1);
+    expect(moveTask).toHaveBeenCalledTimes(1);
+    await expect(service.ensureDefaultProject()).resolves.toBe(defaultProject);
+    // 远端草稿也不再分配 root 外目录；pending 草稿仍落在默认工作区。
+    await expect(
+      service.prepareSession({ draftId: "cc29167e-5a72-4c24-9e31-adcc584c73b4" }),
+    ).resolves.toEqual({
+      projectId: null,
+      workspacePath: defaultRoot,
+      additionalDirectories: [],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

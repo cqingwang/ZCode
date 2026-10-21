@@ -54,6 +54,12 @@ export interface IProjectService {
     draftId?: string;
     reuseDraft?: boolean;
   }): Promise<ProjectDirectories>;
+  /**
+   * 远端 Host 的默认项目：固定 root 为默认工作区，并吸收该目录下的历史无归属任务。
+   *
+   * UI 的“不在项目中工作”仍以 projectId=null 展示；只有落库预留时使用此归属。
+   */
+  ensureDefaultProject(params?: { hostId?: string }): Promise<VirtualProject>;
   /** 缺 task = []，缺 project / DB 错误必须拒绝。软删项目仍可恢复历史任务。 */
   resolveSessionDirectories(task: ProjectTaskRef, hostId?: string): Promise<ProjectDirectories>;
 }

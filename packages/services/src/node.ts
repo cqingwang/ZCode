@@ -18,7 +18,10 @@ import {
 } from "#src/project/index.js";
 export { createLegacySingleRootProjectService } from "#src/project/index.js";
 export { createRemoteProjectService } from "#src/remote-projects/index.js";
-import { getZCodeDataRootDir as projectDataRoot } from "#src/paths.js";
+import {
+  getConversationWorkspaceDir,
+  getZCodeDataRootDir as projectDataRoot,
+} from "#src/paths.js";
 import { createTaskGroupService, ITaskGroupService, groupTaskKey } from "#src/task-groups/index.js";
 import { IGenUiService } from "./gen-ui/contract.js";
 import { createGenUiService } from "./gen-ui/node.js";
@@ -2176,6 +2179,7 @@ export function createLocalServices(options: {
       read: (params) => fileService.readdir(params),
     },
     ownerHostId: options?.projectStorageHostId,
+    defaultProjectRoot: getConversationWorkspaceDir(),
     resolveHost: options?.resolveProjectHostService,
     repository: () => taskIndexRepo.getProjectRepository(),
     workspaceDirectory: join(projectDataRoot(), "workspace"),
@@ -2214,17 +2218,37 @@ export function createLocalServices(options: {
     hostId: options?.projectStorageHostId ?? "local",
     workspaceIdentity: undefined,
   });
+  const remoteProjectOwner = Boolean(
+    options?.projectStorageHostId && options.projectStorageHostId !== "local",
+  );
+  const isDefaultConversationWorkspace = (workspacePath: string) =>
+    remoteProjectOwner && workspacePath === getConversationWorkspaceDir();
   const zcodeAgentService = createZCodeAgentService({
     prepareProjectExecution,
-    prepareSessionCreation: async (target) =>
-      (await taskIndexRepo.getProjectRepository()).reserveCreatedTask({
-        task: { ...target, taskId: target.sessionId },
-        projectId: target.projectId,
-        additionalDirectories: target.additionalDirectories,
-      }).additionalDirectories,
-    resolveSessionDirectories: async (target) =>
-      (await projectService.resolveSessionDirectories({ ...target, taskId: target.sessionId }))
-        .additionalDirectories,
+    prepareSessionCreation: async (target) => {
+      const repository = await taskIndexRepo.getProjectRepository();
+      let projectId = target.projectId;
+      if (!projectId && isDefaultConversationWorkspace(target.workspacePath)) {
+        // 远端 Host 不允许无归属会话；UI 的“不在项目中工作”统一落到默认项目。
+        // 只映射默认工作区，其他无项目路径仍按原约束拒绝。
+        projectId = (await projectService.ensureDefaultProject()).id;
+      }
+      return (
+        await repository.reserveCreatedTask({
+          task: { ...target, taskId: target.sessionId },
+          projectId,
+          additionalDirectories: target.additionalDirectories,
+        })
+      ).additionalDirectories;
+    },
+    resolveSessionDirectories: async (target) => {
+      // 历史默认工作区任务可能仍是无归属行；恢复前先并入默认项目，避免远端约束拒绝。
+      if (isDefaultConversationWorkspace(target.workspacePath))
+        await projectService.ensureDefaultProject();
+      return (
+        await projectService.resolveSessionDirectories({ ...target, taskId: target.sessionId })
+      ).additionalDirectories;
+    },
     ...(agentAccountProviderConfigSource
       ? { accountProviderConfigSource: agentAccountProviderConfigSource }
       : {}),

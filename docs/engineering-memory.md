@@ -4,6 +4,56 @@
 
 ---
 
+## EM-2026-10-21-05：远端无项目会话统一落到默认工作区
+
+- **日期**：2026-10-21
+- **作用域**：`packages/services/src/node.ts`、`packages/services/src/project/`、`packages/services/src/project-storage/`
+- **适用版本**：官方 `offical/main` 3.16.2（`3c5b2276`）；Node 24.14.0
+
+### 症状 / 原始错误
+
+在 Web 服务中选择“不在项目中工作”后发送消息，前端提示“发送失败，请稍后重试”，服务日志返回：
+
+```text
+zcode-agent.sendConversationCommandV4 FAIL
+Error: project.remote-project-required
+```
+
+### 触发条件
+
+- `projectStorageHostId` 非 `local`，即当前服务是远端持库 Host；
+- 会话没有 `projectId`，UI 以 `workspacePurpose=conversation` 进入默认工作区；
+- 首次创建或恢复该会话时走到 `reserveCreatedTask`。
+
+### 根因
+
+远端 Host 的单 root 约束要求每个会话必须归属项目，但“不在项目中工作”只把 cwd 指向 `~/.zcode/workspace/default`，没有写入项目归属；因此 `prepareSessionCreation` 仍以 `projectId=null` 落库，被 `assertRemoteTaskDirectories` 拒绝。
+
+### 最终修复
+
+1. `prepareSession()` 在远端无项目时幂等创建/复用 root 固定为 `~/.zcode/workspace/default` 的普通默认项目，但仍返回 `projectId=null`，保持 UI 的“不在项目中工作”语义。
+2. `prepareSessionCreation` 仅在 cwd 等于默认工作区时把 `projectId` 解析为默认项目，再走原有 `reserveCreatedTask`；其他无项目路径继续拒绝。
+3. 历史无归属的默认工作区任务复用既有 `moveTask()` 补归属，不改 CLI 事实、cwd、执行目录、归档/置顶/未读。
+4. 不放宽远端单 root、cwd 归属和附加目录约束。
+
+### 回归测试路径与命令
+
+```bash
+pnpm exec vitest run \
+  packages/services/src/project/preparation-race/contract.test.ts \
+  packages/services/src/project/contract.test.ts \
+  packages/services/src/project-storage/remote-single-root/contract.test.ts \
+  packages/services/src/project-storage/repository/contract.test.ts \
+  packages/services/src/project-storage/default-workspace/contract.test.ts
+```
+
+### 已排除方案
+
+- 放宽 `assertRemoteTaskDirectories` 允许无归属会话：会破坏远端单 root 和跨 Host 归属约束。
+- 为默认工作区单独分配 `draft-*` 目录：cwd 不在项目 root 内，仍会被远端约束拒绝。
+
+---
+
 ## EM-2026-10-21-04：以官方 main 为基线维护本地侧栏增强
 
 - **日期**：2026-10-21

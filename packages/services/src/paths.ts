@@ -47,7 +47,12 @@ export function getZCodeDataRootDir(): string {
   return join(getDataBaseDir(), ".zcode");
 }
 
-/** 非项目对话共享的真实工作目录；默认 ~/.zcode/workspace/default。 */
+/**
+ * 非项目对话共享的真实工作目录；默认 ~/.zcode/workspace/default。
+ *
+ * 该目录同时作为默认项目 root：远端 Host 仍要求会话归属项目，
+ * “不在项目中工作”只改变 UI 语义，底层复用同一个默认项目。
+ */
 export function getConversationWorkspaceDir(): string {
   return join(getZCodeDataRootDir(), "workspace", "default");
 }

@@ -2,7 +2,7 @@ import type { FileEntry } from "@zcode/shared";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
-import { isAbsolute, join, normalize } from "node:path";
+import { basename, isAbsolute, join, normalize } from "node:path";
 import type { ProjectRepositoryContract } from "#src/project-storage/contract.js";
 import type { IProjectService, ProjectDirectories, VirtualProject } from "#src/project/contract.js";
 export { IProjectService } from "#src/project/contract.js";
@@ -76,6 +76,13 @@ export function createProjectService(options: {
   repository(): Promise<ProjectRepositoryContract>;
   workspaceDirectory: string;
   ownerHostId?: string;
+  /**
+   * 无项目会话的默认项目 root。
+   *
+   * 远端 Host 不允许无归属会话；UI 选择“不在项目中工作”时，
+   * 这里把请求解析到默认项目，而不是放宽远端约束。
+   */
+  defaultProjectRoot?: string;
   directories?: ProjectDirectoryPort;
   /** 只解析现有连接；连接缺失拒绝，不创建替代 Host。 */
   resolveHost?: (hostId: string) => Promise<IProjectService>;
@@ -87,8 +94,64 @@ export function createProjectService(options: {
     return options.resolveHost(hostId);
   };
   const creationFlights = new Map<string, Promise<ProjectDirectories>>();
+  let defaultProjectFlight: Promise<VirtualProject> | null = null;
+  let defaultProjectAdopted = false;
+  const remoteOwner = Boolean(options.ownerHostId && options.ownerHostId !== "local");
   const changed = async () => {
     await options.afterChange?.();
+  };
+  const ensureDefaultProject = async (
+    repository: ProjectRepositoryContract,
+  ): Promise<VirtualProject> => {
+    if (!remoteOwner) throw new Error("project.default-project-unavailable");
+    const root = options.defaultProjectRoot;
+    if (!root) throw new Error("project.remote-project-required");
+    let project = repository
+      .readTree({ includeTasks: false })
+      .projects.find(
+        (project) => !project.deleted && project.roots.some((entry) => entry.rootPath === root),
+      );
+    if (!project) {
+      if (!defaultProjectFlight) {
+        defaultProjectFlight = (async () => {
+          // 默认工作区是产品目录，不要求用户先手动创建；失败保持 fail-fast。
+          await mkdir(root, { recursive: true });
+          if ((await readPrimaryRootStatus(root)) !== "available")
+            throw new Error("project.directory-required");
+          const created = repository.saveProject({ roots: [root], name: basename(root) });
+          await changed();
+          return created;
+        })().finally(() => {
+          defaultProjectFlight = null;
+        });
+      }
+      project = await defaultProjectFlight;
+    }
+    // 升级前默认工作区任务可能仍是无归属行；在首次解析时一次性并入默认项目。
+    // 复用既有 moveTask，保持远端单 root / cwd 归属约束，不新增仓库写入口。
+    if (!defaultProjectAdopted) {
+      const tasks = repository
+        .readTree()
+        .tasks.filter(
+          (task) =>
+            task.hostId === project.hostId &&
+            task.projectId === null &&
+            task.workspacePath === root,
+        );
+      for (const task of tasks)
+        repository.moveTask({
+          task: {
+            taskId: task.taskId,
+            workspacePath: task.workspacePath,
+            ...(task.workspaceIdentity ? { workspaceIdentity: task.workspaceIdentity } : {}),
+          },
+          projectId: project.id,
+        });
+      defaultProjectAdopted = true;
+      // 批量并入只广播一次，避免启动时为每条历史任务触发项目树刷新。
+      if (tasks.length) await changed();
+    }
+    return project;
   };
   const service: IProjectService = {
     async readDirectory(params = {}) {
@@ -198,6 +261,11 @@ export function createProjectService(options: {
       if (remote) return remote.resolveSessionDirectories(task);
       return (await options.repository()).resolveSessionDirectories(task);
     },
+    async ensureDefaultProject(params) {
+      const remote = await route(params?.hostId);
+      if (remote) return remote.ensureDefaultProject();
+      return ensureDefaultProject(await options.repository());
+    },
     async prepareSession(params) {
       const draftId =
         params?.draftId === undefined ? undefined : z.string().uuid().parse(params.draftId);
@@ -206,9 +274,19 @@ export function createProjectService(options: {
       const remote = await route(params?.hostId);
       if (remote) return remote.prepareSession({ projectId: params?.projectId });
       const id = params?.projectId;
-      const remoteOwner = Boolean(options.ownerHostId && options.ownerHostId !== "local");
-      // 旧入口可绕过项目直接在远端 mkdir；必须在目录或会话副作用之前拒绝。
-      if (remoteOwner && !id) throw new Error("project.remote-project-required");
+      if (remoteOwner && !id) {
+        // 远端 Host 仍要求会话归属项目；UI 的“不在项目中工作”只落到固定默认目录，
+        // 返回 projectId=null 保持交互语义，真正落库时再由创建入口补默认项目归属。
+        // 草稿 ID 只参与客户端 pending 恢复，不再为远端分配 root 外的 draft-* 目录。
+        const project = await ensureDefaultProject(await options.repository());
+        const workspacePath = project.roots.find((root) => root.isPrimary)?.rootPath;
+        if (!workspacePath) throw new Error("project.primary-root-missing");
+        return {
+          projectId: null,
+          workspacePath,
+          additionalDirectories: [],
+        };
+      }
       if (id && creationFlights.has(id)) return creationFlights.get(id)!;
       const flight = (async (): Promise<ProjectDirectories> => {
         if (!id) {
@@ -317,6 +395,7 @@ export function bindRemoteProjectIdentities(
         workspaceIdentity: await resolveIdentity(directories.workspacePath),
       };
     },
+    ensureDefaultProject: (params) => service.ensureDefaultProject(params),
     async resolveSessionDirectories(task, hostId) {
       const directories = await service.resolveSessionDirectories(task, hostId);
       // 已有任务恢复曾漏补远程身份，导致同一 cwd 被导航隔离校验拒绝。

@@ -27,6 +27,8 @@ Host 项目组织态的持久化升级。调用者持有 app SQLite 连接，CLI
 
 0006_default_workspace_tasks 一次性纠正系统 default 目录误迁移：只处理旧迁移时已创建且未编辑、未改名、单 root 的自动项目，任务 project_id 清空且容器软删；CLI 事实、执行目录、归档/置顶/未读及定时定义不变。只触及 tasks/projects，旧 checksum 不变；后续手建/恢复不会重复纠正。
 
+远端默认项目由 project 服务幂等创建；历史无归属任务复用既有 `moveTask()` 补上 project_id 与 ownership 标记，不改 CLI 事实、cwd、执行目录、归档/置顶/未读，重复调用幂等。其他目录和跨 Host 任务不受影响。
+
 ## 2026-10-10 远程单目录合同
 
 本地仍允许 0..n roots；可信 ownerHostId 非 local 的持库宿主只允许恰好一个固定 root。远程创建必须有项目，prepareSession、reserveCreatedTask 与 moveTask 不得产生无归属或附加目录；根路径更新和缺 root 拖动在写事务中拒绝。客户端 hostId 不能改变持库身份。历史迁移数据不被裁剪，失败不得部分写入。

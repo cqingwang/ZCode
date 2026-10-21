@@ -203,6 +203,7 @@ it("routes every foreign project operation to its existing owner and never falls
     deleteProject: vi.fn(async () => {}),
     moveTask: vi.fn(async () => {}),
     reorderProjects: vi.fn(async () => {}),
+    ensureDefaultProject: vi.fn(async () => ({ id: "remote-p" }) as VirtualProject),
     prepareSession: vi.fn(async () => ({
       projectId: "remote-p",
       workspacePath: "/remote",
@@ -235,6 +236,7 @@ it("routes every foreign project operation to its existing owner and never falls
     workspacePath: "/remote",
   });
   await service.resolveSessionDirectories({ workspacePath: "/remote", taskId: "s" }, "source");
+  await service.ensureDefaultProject({ hostId: "source" });
   for (const method of Object.values(remote)) expect(method).toHaveBeenCalledTimes(1);
   expect(repository).not.toHaveBeenCalled();
   await expect(service.readTree({ hostId: "offline" })).rejects.toThrow("project.host-offline");
